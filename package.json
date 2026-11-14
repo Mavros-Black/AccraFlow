@@ -1,0 +1,38 @@
+{
+  "name": "accraflow-ai",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test",
+    "format": "prettier --write app lib tests playwright.config.ts",
+    "predev": "node scripts/prepare-map-assets.mjs",
+    "prebuild": "node scripts/prepare-map-assets.mjs"
+  },
+  "dependencies": {
+    "lucide-react": "^1.73.0",
+    "maplibre-gl": "^6.18.0",
+    "next": "16.4.6",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "recharts": "^3.10.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "@tailwindcss/postcss": "^4.3.5",
+    "@tailwindcss/turbopack": "4.3.3",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.6",
+    "prettier": "^3.10.1",
+    "tailwindcss": "4.3.3",
+    "typescript": "^5"
+  }
+}
