@@ -35,11 +35,49 @@ Browser tests currently use Microsoft Edge installed at `/Applications/Microsoft
 - Infrastructure and administration integration states explain the missing surveyed inventory, database and authentication.
 - Keyboard-accessible native report dialog, Escape dismissal, focus containment, map failure messaging, and empty report states.
 
+## Persistent organization workspace
+
+The dashboard map has an opt-in **Show organization reports** control for signed-in accounts. It displays reports available to the selected organization, with status labels and a separate list and details panel. Rejected and withdrawn reports remain in the list but have no map markers. Activating this layer hides the synthetic map layers by default; dashboard KPI cards and other demo sections continue to show only fictional data. The layer is limited to the API’s 500 most recent accessible reports and can be refreshed manually.
+
+The separate **Organization workspace** (`/workspace`) provides authenticated incident submission, correction and withdrawal before review, moderation and status history, private photo attachments, work orders, assignments and due dates, and administrator-managed memberships and audit records. It does not replace or import the fictional dashboard data. Without Supabase configuration its API returns a configuration error and the demo remains available.
+
+To connect a new Supabase project:
+
+1. Copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` to the project's URL and public/publishable key. Never put a service-role or secret key in a `NEXT_PUBLIC_` variable. Restart the development server after changes.
+2. Review and apply all files in `supabase/migrations/` in filename order, committing each migration separately to the intended project, using the Supabase migration tooling or SQL editor with sufficient privileges. These migrations assume a fresh AccraFlow schema and Supabase Auth and Storage; review existing database and Storage policies before applying them. Back up any existing project first.
+3. Create a **private** Storage bucket named `accraflow-incident-photos` through the Supabase dashboard or Storage API. Set its file size limit to 5 MiB and allowed MIME type to `image/jpeg`. The server accepts JPEG, PNG, and WebP uploads and re-encodes them to JPEG, stripping embedded metadata. Images are limited to 20 megapixels and 5 MiB before and after conversion. Do not enable public access.
+4. Create the first Auth account in Supabase. New Auth accounts receive a profile automatically. For an existing account created before the migration, insert its profile as part of the bootstrap below. In a privileged SQL session, substitute the actual Auth user UUID and an organization name:
+
+   ```sql
+   begin;
+   insert into public.profiles (id, display_name)
+   values ('AUTH_USER_UUID', 'Administrator') on conflict (id) do nothing;
+   with new_org as (
+     insert into public.organizations (name) values ('Organization name')
+     returning id
+   )
+   insert into public.memberships (organization_id, user_id, role)
+   select id, 'AUTH_USER_UUID'::uuid, 'admin' from new_org;
+   commit;
+   ```
+
+   The administrator can then add existing Auth user UUIDs and manage their roles in the workspace. The final active administrator cannot be removed or demoted. New account creation itself is not provided by the application.
+
+All organization data access uses the signed-in user's Supabase session, row-level security and database functions. A resident sees their own reports; moderators review reports, operators manage work orders, and administrators manage memberships and view the audit log. State changes and their history and audit entries commit together. The audit log is protected from normal application users, but database owners can modify it; it is not a tamper-proof external audit service. Review request origin handling against the actual public URL and proxy configuration before deployment.
+
+Run the local PostgreSQL/PostGIS authorization and image-processing tests with `npm run test:backend`. The tests use an embedded PostgreSQL-compatible instance with stand-ins for Supabase Auth and Storage; they do not establish compatibility with a live Supabase project. Applying the migrations, provisioning the bucket and users, and testing end-to-end with real sessions remain necessary. Storage orphan cleanup and retention policies, rate limiting, permanent incident deletion, and before/after photo classification are not yet implemented. Withdrawn reports and their photos remain available to authorized users. Do not use the application for operational decisions until these integration and production checks are complete.
+
+## GeoJSON preflight
+
+The Infrastructure screen includes a local GeoJSON preflight tool. Select an RFC 7946 FeatureCollection up to 5 MiB, enter its source name, survey or collection date, and license or permission, and run the check. The tool checks geometry structure, coordinate ranges, polygon ring closure, approximate Accra bounds and size limits (2,000 features and 100,000 positions). It can download a JSON report with the entered provenance and findings. The input file stays in the browser; neither the dataset nor report is uploaded or persisted by the app.
+
+A structural pass is not source approval or a survey certification. The tool does not verify topology, coordinate reference history, geometry accuracy, licensing, or ownership. PostGIS validation and qualified review are required before importing or using the data. Import, persistent source approval and real asset layers remain to be built.
+
 ## Data boundaries
 
 All incident records, marker positions, maintenance tasks and operator identity are **DEMO**. The 24 incident fixtures reproduce the reference card counts; the map initially shows four featured examples and will also show a selected report. They do not describe observed flooding or surveyed drains. Data and scenario edits live only in React memory and reset on reload. Map geography is real; the provider's attribution is retained. The map contains clearly labeled synthetic drainage-like lines and colored illustrative zones; these are not surveyed drainage paths or flood predictions. The coverage percentage is a labeled synthetic fixture calculation, not a measurement of Accra. No actual weather observations, hydraulic outputs, coverage measurements or prediction metrics are shown.
 
-Status history is append-only within the UI, but is **not** a persistent or tamper-proof audit trail. Status and completion controls are demonstration controls, without authentication or authorization. Do not use this workspace for operational decisions.
+On the demo dashboard, status history exists only in memory and status and completion controls have no authentication or authorization. Do not use the demo for operational decisions. The separate organization workspace has persistent, server-authorized workflows when Supabase is configured.
 
 The incident image and skyline artwork are AI-generated illustrations, not real incident photographs. Satellite imagery requires a separately configured provider key; live weather, genuine risk overlays and predicted improvement percentages are not implemented as live features. A sourced asset inventory and validated engineering model are prerequisites for genuine engineering results. Construction recommendations require qualified professional review.
 
@@ -57,13 +95,13 @@ The incident image and skyline artwork are AI-generated illustrations, not real 
 
 ## Remaining phases
 
-Phase 2: PostgreSQL/PostGIS migrations, Supabase Auth and organization roles, server-enforced moderation, incident CRUD, photo storage, immutable audit history and persistent work orders. Configure secrets only through environment variables; never commit them. There are no backend environment variables in use yet.
+Phase 2 foundation is implemented locally as described above. A real Supabase integration test, permanent deletion and retention policy, and the other production items noted above remain. Configure secrets only through environment variables; never commit them.
 
-Phase 3: provenance-backed GeoJSON ingestion and validation, surveyed drainage assets and catchments, typed FastAPI asynchronous job contracts, and EPA SWMM only with sufficient survey, rainfall, hydraulic and calibration data.
+Phase 3: persistent provenance-backed GeoJSON ingestion and validation (local structural preflight is available), surveyed drainage assets and catchments, typed FastAPI asynchronous job contracts, and EPA SWMM only with sufficient survey, rainfall, hydraulic and calibration data.
 
 Phase 4: backend security testing, accessibility hardening and deployment documentation. External deployment and paid services require explicit approval per the master prompt.
 
-The next coding step is to separate the demo workflow from persistent data access and add the PostGIS schema with organization-scoped authorization.
+The next step is to provision a test Supabase project and verify the persistent workflows end to end.
 
 ## Verification and provider notes
 

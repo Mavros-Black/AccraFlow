@@ -42,6 +42,12 @@ import {
 } from "recharts";
 import { z } from "zod";
 import AccraMap from "./components/accra-map";
+import GeojsonPreflightTool from "./components/geojson-preflight";
+import {
+  reportStatus,
+  type OrganizationMembership,
+  type OrganizationReport,
+} from "@/lib/organization-reports";
 import {
   demoIncidents,
   demoPreviousSnapshot,
@@ -99,6 +105,108 @@ export default function Home() {
   const [selected, setSelected] = useState("AF-001");
   const [center, setCenter] = useState<[number, number]>([-0.214, 5.587]);
   const [showIncidents, setShowIncidents] = useState(true);
+  const [organizationEnabled, setOrganizationEnabled] = useState(false);
+  const [memberships, setMemberships] = useState<OrganizationMembership[]>([]);
+  const [organizationId, setOrganizationId] = useState("");
+  const [organizationReports, setOrganizationReports] = useState<
+    OrganizationReport[]
+  >([]);
+  const [selectedOrganizationReport, setSelectedOrganizationReport] =
+    useState("");
+  const [organizationMessage, setOrganizationMessage] = useState("");
+  const [organizationVersion, setOrganizationVersion] = useState(0);
+  useEffect(() => {
+    if (!organizationEnabled) return;
+    const controller = new AbortController();
+    async function loadSession() {
+      try {
+        const response = await fetch("/api/auth/session", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok)
+          throw new Error(
+            response.status === 401
+              ? "Sign in to view organization reports."
+              : "Organization reports are unavailable. Check your connection or backend configuration.",
+          );
+        const data: { memberships: OrganizationMembership[] } =
+          await response.json();
+        if (controller.signal.aborted) return;
+        setMemberships(data.memberships);
+        setOrganizationId((previous) =>
+          data.memberships.some((member) => member.organization_id === previous)
+            ? previous
+            : (data.memberships[0]?.organization_id ?? ""),
+        );
+        setOrganizationMessage(
+          data.memberships.length
+            ? ""
+            : "Your account has no active organization membership.",
+        );
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setMemberships([]);
+        setOrganizationId("");
+        setOrganizationReports([]);
+        setSelectedOrganizationReport("");
+        setOrganizationMessage(
+          error instanceof Error
+            ? error.message
+            : "Unable to load your session.",
+        );
+      }
+    }
+    void loadSession();
+    return () => controller.abort();
+  }, [organizationEnabled, organizationVersion]);
+  useEffect(() => {
+    if (!organizationEnabled || !organizationId) return;
+    const controller = new AbortController();
+    async function loadReports() {
+      try {
+        const response = await fetch(
+          `/api/incidents?organizationId=${encodeURIComponent(organizationId)}`,
+          { cache: "no-store", signal: controller.signal },
+        );
+        if (!response.ok)
+          throw new Error(
+            "Unable to load organization reports. Check your session and try again.",
+          );
+        const data: { incidents: OrganizationReport[] } = await response.json();
+        if (controller.signal.aborted) return;
+        setOrganizationReports(data.incidents);
+        setSelectedOrganizationReport((previous) =>
+          data.incidents.some((report) => report.id === previous)
+            ? previous
+            : "",
+        );
+        setOrganizationMessage("");
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setOrganizationReports([]);
+        setSelectedOrganizationReport("");
+        setOrganizationMessage(
+          error instanceof Error
+            ? error.message
+            : "Unable to load organization reports.",
+        );
+      }
+    }
+    void loadReports();
+    return () => controller.abort();
+  }, [organizationEnabled, organizationId, organizationVersion]);
+  const selectOrganizationReport = useCallback(
+    (id: string) => {
+      setSelectedOrganizationReport(id);
+      const report = organizationReports.find((item) => item.id === id);
+      if (report) setCenter([report.longitude, report.latitude]);
+    },
+    [organizationReports],
+  );
+  const selectedLiveReport = organizationReports.find(
+    (report) => report.id === selectedOrganizationReport,
+  );
   const [filter, setFilter] = useState("All statuses");
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState("");
@@ -628,6 +736,9 @@ export default function Home() {
             </span>
           </div>
           <div className="top-actions">
+            <Link className="live-workspace-link" href="/workspace">
+              Organization workspace
+            </Link>
             <span className="demo">DEMO MODE</span>
             <button
               aria-label="Show notifications"
@@ -674,9 +785,9 @@ export default function Home() {
           <div className="demo-banner">
             <ShieldCheck size={17} />
             <span>
-              <strong>Demonstration workspace.</strong> All incidents, locations
-              and metrics are synthetic. Basemap geography is real. Session
-              changes reset on reload.
+              <strong>Demonstration workspace.</strong> The demo cards, demo
+              reports, and demo layers are synthetic. Basemap geography is real.
+              Demo changes reset on reload.
             </span>
           </div>
           {notice && (
@@ -865,6 +976,30 @@ export default function Home() {
                       />
                       <Layers size={14} /> Demo map layers
                     </label>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => {
+                        if (organizationEnabled) {
+                          setOrganizationReports([]);
+                          setSelectedOrganizationReport("");
+                          setMemberships([]);
+                          setOrganizationId("");
+                          setOrganizationMessage("");
+                          setOrganizationEnabled(false);
+                        } else {
+                          setShowIncidents(false);
+                          setOrganizationEnabled(true);
+                          setOrganizationMessage(
+                            "Loading organization reports…",
+                          );
+                        }
+                      }}
+                    >
+                      {organizationEnabled
+                        ? "Hide organization reports"
+                        : "Show organization reports"}
+                    </button>
                   </div>
                   <AccraMap
                     incidents={visible.filter(
@@ -876,7 +1011,133 @@ export default function Home() {
                     onSelect={choose}
                     center={center}
                     showIncidents={showIncidents}
+                    organizationReports={
+                      organizationEnabled ? organizationReports : []
+                    }
+                    selectedOrganizationReport={selectedOrganizationReport}
+                    onSelectOrganizationReport={selectOrganizationReport}
                   />
+                  {organizationEnabled && (
+                    <div className="organization-map-controls">
+                      <div className="organization-map-head">
+                        <div>
+                          <strong>Organization reports</strong>
+                          <p>
+                            Reports visible to your signed-in account. Status
+                            indicates whether a report has been verified.
+                          </p>
+                        </div>
+                      </div>
+                      {organizationEnabled && (
+                        <>
+                          {memberships.length > 0 && (
+                            <div className="organization-map-toolbar">
+                              <label>
+                                Organization{" "}
+                                <select
+                                  aria-label="Organization"
+                                  value={organizationId}
+                                  onChange={(event) => {
+                                    setOrganizationReports([]);
+                                    setSelectedOrganizationReport("");
+                                    setOrganizationMessage(
+                                      "Loading organization reports…",
+                                    );
+                                    setOrganizationId(event.target.value);
+                                  }}
+                                >
+                                  {memberships.map((member) => (
+                                    <option
+                                      key={member.organization_id}
+                                      value={member.organization_id}
+                                    >
+                                      {member.organizations?.name ??
+                                        "Organization"}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <button
+                                type="button"
+                                className="text-button"
+                                onClick={() => {
+                                  setOrganizationReports([]);
+                                  setSelectedOrganizationReport("");
+                                  setOrganizationMessage(
+                                    "Refreshing organization reports…",
+                                  );
+                                  setOrganizationVersion(
+                                    (version) => version + 1,
+                                  );
+                                }}
+                              >
+                                Refresh
+                              </button>
+                            </div>
+                          )}
+                          {organizationMessage && (
+                            <p role="status">
+                              {organizationMessage}{" "}
+                              <Link href="/workspace">
+                                Open organization workspace
+                              </Link>
+                            </p>
+                          )}
+                          {!organizationMessage &&
+                            memberships.length > 0 &&
+                            organizationReports.length === 0 && (
+                              <p>No reports are available to this account.</p>
+                            )}
+                          {organizationReports.length > 0 && (
+                            <>
+                              <p className="organization-map-note">
+                                Blue markers are organization reports; rejected
+                                and withdrawn reports appear only in the list.
+                                Demo figures elsewhere are unchanged.
+                              </p>
+                              <div className="organization-report-list">
+                                {organizationReports.map((report) => (
+                                  <button
+                                    type="button"
+                                    key={report.id}
+                                    className={
+                                      selectedOrganizationReport === report.id
+                                        ? "organization-report selected"
+                                        : "organization-report"
+                                    }
+                                    onClick={() =>
+                                      selectOrganizationReport(report.id)
+                                    }
+                                  >
+                                    <strong>{report.title}</strong>
+                                    <span>
+                                      {reportStatus(report.status)} ·{" "}
+                                      {reportStatus(report.category)}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                          {selectedLiveReport && (
+                            <div className="organization-report-detail">
+                              <strong>{selectedLiveReport.title}</strong>
+                              <span>
+                                {reportStatus(selectedLiveReport.status)} ·{" "}
+                                {reportStatus(selectedLiveReport.category)} ·{" "}
+                                {selectedLiveReport.latitude.toFixed(4)},{" "}
+                                {selectedLiveReport.longitude.toFixed(4)}
+                              </span>
+                              <p>{selectedLiveReport.description}</p>
+                              <Link href="/workspace">
+                                Manage in organization workspace →
+                              </Link>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
                   <div className="map-source">
                     Basemap:{" "}
                     {process.env.NEXT_PUBLIC_ARCGIS_API_KEY
@@ -1306,22 +1567,25 @@ export default function Home() {
             </>
           )}
           {page === "Infrastructure" && (
-            <section className="panel empty-state">
-              <Layers size={38} />
-              <h2>No verified assets connected</h2>
-              <p>
-                Surveyed drainage segments, catchments and culverts will appear
-                here after source approval and geometry validation.
-              </p>
-              <div className="source-card">
-                <strong>Data provenance policy</strong>
+            <>
+              <section className="panel empty-state">
+                <Layers size={38} />
+                <h2>No verified assets connected</h2>
                 <p>
-                  Real assets require source, survey date, geometry, condition,
-                  and verification status. Synthetic incident points do not
-                  represent drainage infrastructure.
+                  Surveyed drainage segments, catchments and culverts will
+                  appear here after source approval and geometry validation.
                 </p>
-              </div>
-            </section>
+                <div className="source-card">
+                  <strong>Data provenance policy</strong>
+                  <p>
+                    Real assets require source, survey date, geometry,
+                    condition, and verification status. Synthetic incident
+                    points do not represent drainage infrastructure.
+                  </p>
+                </div>
+              </section>
+              <GeojsonPreflightTool />
+            </>
           )}
           {adminPage && (
             <section className="panel empty-state">

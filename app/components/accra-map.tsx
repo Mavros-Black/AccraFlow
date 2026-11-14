@@ -3,6 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Incident } from "@/lib/demo";
+import {
+  reportStatus,
+  type OrganizationReport,
+} from "@/lib/organization-reports";
 import { demoNetwork, demoRisk } from "@/lib/demo-map";
 export default function AccraMap({
   incidents,
@@ -10,12 +14,18 @@ export default function AccraMap({
   onSelect,
   center,
   showIncidents,
+  organizationReports,
+  selectedOrganizationReport,
+  onSelectOrganizationReport,
 }: {
   incidents: Incident[];
   selected: string;
   onSelect: (id: string) => void;
   center: [number, number];
   showIncidents: boolean;
+  organizationReports: OrganizationReport[];
+  selectedOrganizationReport: string;
+  onSelectOrganizationReport: (id: string) => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -211,6 +221,47 @@ export default function AccraMap({
     });
     return () => markers.forEach((marker) => marker.remove());
   }, [incidents, selected, onSelect, showIncidents]);
+  useEffect(() => {
+    if (!map.current) return;
+    const markers = organizationReports
+      .filter((report) => !["rejected", "withdrawn"].includes(report.status))
+      .map((report) => {
+        const button = document.createElement("button");
+        button.className = `organization-map-pin ${selectedOrganizationReport === report.id ? "chosen" : ""}`;
+        button.setAttribute(
+          "aria-label",
+          `Organization report: ${report.title}, ${reportStatus(report.status)}`,
+        );
+        button.textContent = "●";
+        button.onclick = () => onSelectOrganizationReport(report.id);
+        const marker = new maplibregl.Marker({ element: button })
+          .setLngLat([report.longitude, report.latitude])
+          .addTo(map.current!);
+        if (report.id === selectedOrganizationReport) {
+          const content = document.createElement("div");
+          content.className = "demo-popup-content";
+          const title = document.createElement("strong");
+          title.textContent = report.title;
+          const status = document.createElement("span");
+          status.textContent = `Organization report · ${reportStatus(report.status)}`;
+          content.append(title, status);
+          marker.setPopup(
+            new maplibregl.Popup({
+              offset: 22,
+              closeButton: false,
+              closeOnClick: false,
+            }).setDOMContent(content),
+          );
+          marker.togglePopup();
+        }
+        return marker;
+      });
+    return () => markers.forEach((marker) => marker.remove());
+  }, [
+    organizationReports,
+    selectedOrganizationReport,
+    onSelectOrganizationReport,
+  ]);
   return (
     <div className="map-canvas">
       <div
@@ -218,9 +269,11 @@ export default function AccraMap({
         className="map-inner"
         data-ready={loaded}
         aria-label={
-          showIncidents
-            ? "Interactive Accra basemap with synthetic demo incident markers"
-            : "Interactive Accra basemap"
+          organizationReports.length
+            ? "Interactive Accra basemap with organization reports"
+            : showIncidents
+              ? "Interactive Accra basemap with synthetic demo incident markers"
+              : "Interactive Accra basemap"
         }
       />
       {!loaded && !error && (
